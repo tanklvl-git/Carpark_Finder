@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ParkFinder Insight - Singapore Car Park & EV Charging Finder</title>
+    <meta
+      name="description"
+      content="Real-time car park lot availability and EV charging stations across Singapore within 1 to 3km radius with high-density data analytics."
+    />
+    
+    <!-- Google Fonts: Inter / Plus Jakarta Sans / Roboto for high density typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    
+    <!-- Application Stylesheet -->
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="h-full m-0 bg-[#f8fafc] text-slate-900 font-sans overflow-hidden">
+    <!-- Accessibility Skip Link for Keyboard Navigation (WCAG 2.1 AA) -->
+    <a href="#main-content" class="skip-link" id="skip-to-content">Skip to main content</a>
+
+    <!-- Top Application Bar (High Density Header: h-14 bg-white border-b border-slate-200) -->
+    <header class="app-header" id="app-header" role="banner">
+      <div class="header-content">
+        <div class="brand-group">
+          <div class="brand-icon-wrapper" aria-hidden="true">
+            <svg class="icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+          </div>
+          <div class="brand-text-container">
+            <h1 class="brand-title" id="app-title">ParkFinder <span class="brand-highlight">Insight</span></h1>
+            <p class="brand-subtitle" id="location-display-text">Target: Singapore CBD (1.2903° N, 103.8520° E)</p>
+          </div>
+        </div>
+
+        <!-- Header Actions: Refresh Timer & Manual Trigger -->
+        <div class="header-actions">
+          <div class="refresh-status-badge" id="refresh-indicator" role="status" aria-live="polite">
+            <div class="pulse-dot" id="refresh-spinner" aria-hidden="true"></div>
+            <span class="refresh-label" id="refresh-timer-text">Auto-refresh: 60s</span>
+          </div>
+
+          <button
+            type="button"
+            class="header-btn"
+            id="manual-refresh-btn"
+            title="Refresh availability now"
+            aria-label="Refresh car park lot status immediately"
+          >
+            <svg class="icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            class="header-btn mobile-only-btn"
+            id="toggle-sidebar-btn"
+            title="Toggle car parks list"
+            aria-label="Toggle list view of available car parks"
+            aria-expanded="false"
+            aria-controls="carparks-sidebar"
+          >
+            <svg class="icon-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Container: Sidebar on the left + Interactive Map -->
+    <main class="main-layout" id="main-content" role="main">
+      
+      <!-- High Density Car Park List Sidebar (Docked on Left on Desktop) -->
+      <aside class="carparks-sidebar" id="carparks-sidebar" aria-label="List of Nearby Car Parks">
+        <div class="sidebar-header">
+          <div class="sidebar-header-meta">
+            <span class="sidebar-kicker">NEARBY LOCATIONS</span>
+            <span class="sidebar-count" id="results-count-title">Loading results...</span>
+          </div>
+          <p class="sidebar-subtitle" id="results-summary-text">Searching within 2.0 km radius...</p>
+          <button
+            type="button"
+            class="sidebar-close-btn"
+            id="close-sidebar-btn"
+            title="Close sidebar"
+            aria-label="Close car parks sidebar list"
+          >
+            <svg class="icon-svg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- High Density Car Parks Results List -->
+        <div
+          class="carparks-list-container custom-scrollbar"
+          id="carparks-list"
+          role="feed"
+          aria-busy="false"
+          aria-live="polite"
+        >
+          <!-- Populated dynamically by app.js -->
+        </div>
+      </aside>
+
+      <!-- Interactive Map Section -->
+      <section class="map-viewport" id="map-section" aria-label="Interactive Map of Singapore Car Parks">
+        
+        <!-- Google Map Mount Element -->
+        <div id="google-map-container" class="map-canvas" role="region" aria-label="Google Map View"></div>
+
+        <!-- Floating Quick District Jump Selector -->
+        <div class="map-floating-panel top-left-panel" id="district-selector-panel">
+          <label for="district-select" class="floating-label">Area Jump:</label>
+          <select id="district-select" class="high-density-select" aria-label="Select Singapore district to view car parks">
+            <option value="1.290270,103.851959" selected>City Hall / CBD</option>
+            <option value="1.304000,103.831900">Orchard Road</option>
+            <option value="1.283400,103.860700">Marina Bay Sands</option>
+            <option value="1.299800,103.855500">Bugis / Bras Basah</option>
+            <option value="1.264400,103.822200">HarbourFront / Sentosa</option>
+            <option value="1.333100,103.743600">Jurong East (Jem/Westgate)</option>
+            <option value="1.353300,103.945200">Tampines Central</option>
+            <option value="1.360200,103.989800">Jewel Changi Airport</option>
+            <option value="1.350600,103.872400">Serangoon / NEX</option>
+            <option value="1.429600,103.835900">Yishun / Northpoint</option>
+          </select>
+        </div>
+
+        <!-- Floating Recenter to User's GPS Location Button -->
+        <div class="map-floating-panel top-right-panel" id="recenter-panel">
+          <button
+            type="button"
+            class="map-control-btn"
+            id="locate-me-btn"
+            title="Locate my current GPS position"
+            aria-label="Center map on my current GPS location"
+          >
+            <svg class="icon-svg" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+              <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Color Coding Availability Legend Floating Card -->
+        <div class="map-floating-panel legend-panel" id="color-legend-card" role="region" aria-label="Car park lot status color legend">
+          <span class="legend-title">Lot Availability:</span>
+          <div class="legend-items-row">
+            <div class="legend-chip legend-red">
+              <span class="legend-dot dot-red" aria-hidden="true"></span>
+              <span class="legend-text">&lt; 5 (Crit)</span>
+            </div>
+            <div class="legend-chip legend-orange">
+              <span class="legend-dot dot-orange" aria-hidden="true"></span>
+              <span class="legend-text">&lt; 10 (Low)</span>
+            </div>
+            <div class="legend-chip legend-green">
+              <span class="legend-dot dot-green" aria-hidden="true"></span>
+              <span class="legend-text">&ge; 10 (High)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fallback / Setup Alert banner -->
+        <div class="setup-alert-banner" id="setup-alert-card" role="alert" hidden>
+          <div class="alert-content">
+            <strong id="alert-title">Google Maps Active</strong>
+            <p id="alert-description">Live Singapore Carpark Data and EV Charging Network are active.</p>
+          </div>
+          <button type="button" class="alert-dismiss-btn" id="dismiss-alert-btn" aria-label="Dismiss message">Dismiss</button>
+        </div>
+
+        <!-- High Density Floating Bottom Control Card (Scan Radius + EV Filter + Force Refresh) -->
+        <div class="floating-controls-dock" id="bottom-controls" role="region" aria-label="Search and Filter Controls">
+          
+          <!-- Scan Radius Control Column -->
+          <div class="dock-column slider-column">
+            <div class="dock-header-row">
+              <label for="radius-slider" class="dock-label" id="radius-slider-label">SCAN RADIUS</label>
+              <span class="dock-value-badge" id="radius-value-text">2.0 km</span>
+            </div>
+            <input
+              type="range"
+              id="radius-slider"
+              class="dock-range-slider"
+              min="1.0"
+              max="3.0"
+              step="0.1"
+              value="2.0"
+              aria-labelledby="radius-slider-label"
+              aria-valuemin="1.0"
+              aria-valuemax="3.0"
+              aria-valuenow="2.0"
+              aria-valuetext="2.0 kilometers"
+            />
+            <div class="slider-ticks-row" aria-hidden="true">
+              <span>1km</span>
+              <span>2km</span>
+              <span>3km</span>
+            </div>
+          </div>
+
+          <!-- EV Filter Toggle Column -->
+          <div class="dock-column filter-column">
+            <div class="filter-label-group">
+              <span class="dock-label">FILTERS</span>
+              <span class="filter-name">EV Charging Only</span>
+            </div>
+            <button
+              type="button"
+              class="ev-switch-btn"
+              id="ev-toggle-btn"
+              role="switch"
+              aria-checked="false"
+              aria-label="Filter only car parks with EV charging stations"
+            >
+              <span class="sr-only" id="ev-toggle-status-text">All Lots</span>
+              <span class="switch-track" aria-hidden="true">
+                <span class="switch-thumb"></span>
+              </span>
+            </button>
+          </div>
+
+          <!-- Action Button Column (Force Refresh) -->
+          <div class="dock-column action-column">
+            <button
+              type="button"
+              class="dock-action-btn"
+              id="dock-force-refresh-btn"
+              aria-label="Force refresh car park availability"
+            >
+              Force Refresh
+            </button>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+    <!-- High Density Bottom Status Bar (h-8 bg-slate-900) -->
+    <footer class="app-status-footer" id="app-status-footer" role="contentinfo">
+      <div class="footer-legend">
+        <div class="footer-legend-item">
+          <span class="footer-dot bg-rose-500" aria-hidden="true"></span>
+          <span class="footer-text">Crit: &lt;5</span>
+        </div>
+        <div class="footer-legend-item">
+          <span class="footer-dot bg-amber-500" aria-hidden="true"></span>
+          <span class="footer-text">Low: &lt;10</span>
+        </div>
+        <div class="footer-legend-item">
+          <span class="footer-dot bg-emerald-500" aria-hidden="true"></span>
+          <span class="footer-text">High: &ge;10</span>
+        </div>
+      </div>
+      <div class="footer-status-text">
+        <span>API LATENCY: 24ms</span>
+        <span class="footer-divider">|</span>
+        <span>SOURCE: LTA DATAMALL</span>
+      </div>
+    </footer>
+
+    <!-- Car Park & EV Detail Modal / Sheet (High Density Theme) -->
+    <div
+      class="detail-modal-backdrop"
+      id="detail-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-carpark-title"
+      hidden
+    >
+      <div class="detail-modal-card" id="detail-modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <span class="agency-tag" id="modal-agency-tag">LTA</span>
+            <h2 class="modal-title" id="modal-carpark-title">Suntec City Mall Carpark</h2>
+            <p class="modal-area" id="modal-carpark-area">Marina Centre &bull; 0.4 km away</p>
+          </div>
+          <button
+            type="button"
+            class="modal-close-btn"
+            id="close-modal-btn"
+            title="Close details"
+            aria-label="Close car park details popup"
+          >
+            <svg class="icon-svg" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body custom-scrollbar" id="modal-carpark-body">
+          <!-- Populated dynamically by app.js -->
+        </div>
+
+        <div class="modal-footer">
+          <a
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="modal-primary-btn"
+            id="modal-navigate-btn"
+          >
+            <svg class="icon-svg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+            </svg>
+            <span>Directions via Google Maps</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Application Logic (Vanilla JavaScript) -->
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
