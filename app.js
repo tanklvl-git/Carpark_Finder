@@ -80,6 +80,7 @@ function initApplication() {
 function cacheDOMElements() {
   elements.mapContainer = document.getElementById("onemap-container");
   elements.onemapSearchInput = document.getElementById("onemap-search-input");
+  elements.searchSubmitBtn = document.getElementById("search-submit-btn");
   elements.onemapSearchDropdown = document.getElementById("onemap-search-dropdown");
   elements.clearSearchBtn = document.getElementById("clear-search-btn");
   elements.districtSelect = document.getElementById("district-select");
@@ -121,6 +122,16 @@ function setupEventListeners() {
     elements.onemapSearchInput.addEventListener("focus", () => {
       if (state.searchResults.length > 0 && elements.onemapSearchDropdown) {
         elements.onemapSearchDropdown.hidden = false;
+      }
+    });
+  }
+
+  // Search Submit Button Click
+  if (elements.searchSubmitBtn) {
+    elements.searchSubmitBtn.addEventListener("click", () => {
+      const query = elements.onemapSearchInput ? elements.onemapSearchInput.value.trim() : "";
+      if (query.length >= 2) {
+        executeOneMapSearch(query, true);
       }
     });
   }
@@ -311,23 +322,46 @@ function handleOneMapSearchInput(e) {
 
   state.searchDebounceTimer = setTimeout(() => {
     executeOneMapSearch(query);
-  }, 250);
+  }, 200);
 }
 
 /**
  * Calls backend `/api/onemap/search` or `/api/insight?action=search` to fetch real-time Singapore geocoding results.
  */
-async function executeOneMapSearch(query) {
+async function executeOneMapSearch(query, autoSelectFirst = false) {
   try {
-    const response = await fetch(`/api/onemap/search?searchVal=${encodeURIComponent(query)}&returnGeom=Y&getAddrDetails=Y&pageNum=1`);
-    if (!response.ok) {
-      throw new Error(`Search failed with status ${response.status}`);
+    let results = [];
+    // 1. Try dedicated proxy endpoint
+    try {
+      const response = await fetch(`/api/onemap/search?searchVal=${encodeURIComponent(query)}&returnGeom=Y&getAddrDetails=Y&pageNum=1`);
+      if (response.ok) {
+        const data = await response.json();
+        results = Array.isArray(data.results) ? data.results : [];
+      }
+    } catch (e) {
+      console.warn("Primary OneMap search route failed, trying fallback...", e);
     }
 
-    const data = await response.json();
-    const results = Array.isArray(data.results) ? data.results : [];
+    // 2. Fallback to insight search endpoint if empty
+    if (results.length === 0) {
+      try {
+        const fbResponse = await fetch(`/api/insight?action=search&searchVal=${encodeURIComponent(query)}`);
+        if (fbResponse.ok) {
+          const fbData = await fbResponse.json();
+          results = Array.isArray(fbData.results) ? fbData.results : [];
+        }
+      } catch (e2) {
+        console.warn("Fallback search route error:", e2);
+      }
+    }
+
     state.searchResults = results;
     state.activeSearchIndex = -1;
+
+    if (autoSelectFirst && results.length > 0) {
+      selectOneMapSearchResult(results[0]);
+      return;
+    }
 
     renderOneMapSearchResults(results, query);
   } catch (err) {
@@ -358,10 +392,20 @@ function renderOneMapSearchResults(results, query) {
     return;
   }
 
-  const html = results.slice(0, 7).map((item, idx) => {
-    const title = item.building || item.address || item.searchVal || "Unknown Location";
-    const sub = [item.road, item.address].filter(Boolean).join(", ") || "Singapore";
-    const postal = item.postal ? `<span class="onemap-postal-badge">S(${item.postal})</span>` : "";
+  const html = results.slice(0, 8).map((item, idx) => {
+    const rawBuilding = item.building || item.BUILDING;
+    const building = rawBuilding && rawBuilding !== "NIL" ? rawBuilding : "";
+    const rawSearchVal = item.searchVal || item.SEARCHVAL || "";
+    const address = item.address || item.ADDRESS || "";
+    const title = building || rawSearchVal || address || "Location";
+
+    const rawRoad = item.road || item.roadName || item.ROAD_NAME;
+    const road = rawRoad && rawRoad !== "NIL" ? rawRoad : "";
+    const sub = [road, address].filter(Boolean).join(", ") || "Singapore";
+
+    const rawPostal = item.postal || item.POSTAL;
+    const postalVal = rawPostal && rawPostal !== "NIL" ? rawPostal : "";
+    const postal = postalVal ? `<span class="onemap-postal-badge">S(${postalVal})</span>` : "";
 
     return `
       <div
@@ -396,6 +440,21 @@ function renderOneMapSearchResults(results, query) {
  * Handles keyboard navigation (ArrowUp, ArrowDown, Enter, Escape) in the search dropdown.
  */
 function handleOneMapSearchKeyDown(e) {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (elements.onemapSearchDropdown && !elements.onemapSearchDropdown.hidden && state.activeSearchIndex >= 0 && state.activeSearchIndex < state.searchResults.length) {
+      selectOneMapSearchResult(state.searchResults[state.activeSearchIndex]);
+    } else if (state.searchResults.length > 0) {
+      selectOneMapSearchResult(state.searchResults[0]);
+    } else {
+      const query = elements.onemapSearchInput ? elements.onemapSearchInput.value.trim() : "";
+      if (query.length >= 2) {
+        executeOneMapSearch(query, true);
+      }
+    }
+    return;
+  }
+
   if (!elements.onemapSearchDropdown || elements.onemapSearchDropdown.hidden) return;
 
   const items = elements.onemapSearchDropdown.querySelectorAll(".onemap-search-item");
@@ -409,13 +468,6 @@ function handleOneMapSearchKeyDown(e) {
     e.preventDefault();
     state.activeSearchIndex = (state.activeSearchIndex - 1 + items.length) % items.length;
     updateActiveSearchItem(items);
-  } else if (e.key === "Enter") {
-    e.preventDefault();
-    if (state.activeSearchIndex >= 0 && state.activeSearchIndex < state.searchResults.length) {
-      selectOneMapSearchResult(state.searchResults[state.activeSearchIndex]);
-    } else if (state.searchResults.length > 0) {
-      selectOneMapSearchResult(state.searchResults[0]);
-    }
   } else if (e.key === "Escape") {
     elements.onemapSearchDropdown.hidden = true;
   }
@@ -444,13 +496,25 @@ function selectOneMapSearchResult(item) {
   const lat = parseFloat(item.lat || item.LATITUDE);
   const lng = parseFloat(item.lng || item.LONGITUDE);
 
-  if (isNaN(lat) || isNaN(lng)) return;
+  if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return;
 
   state.userLocation = { lat, lng };
-  const locName = item.building || item.road || item.address || item.searchVal || "Selected Location";
+
+  const rawBuilding = item.building || item.BUILDING;
+  const building = rawBuilding && rawBuilding !== "NIL" ? rawBuilding : "";
+  const rawRoad = item.road || item.roadName || item.ROAD_NAME;
+  const road = rawRoad && rawRoad !== "NIL" ? rawRoad : "";
+  const rawSearchVal = item.searchVal || item.SEARCHVAL || "";
+  const rawAddress = item.address || item.ADDRESS || "";
+
+  const locName = building || rawSearchVal || road || rawAddress || "Selected Location";
 
   if (elements.onemapSearchInput) {
     elements.onemapSearchInput.value = locName;
+  }
+
+  if (elements.clearSearchBtn) {
+    elements.clearSearchBtn.hidden = false;
   }
 
   if (elements.onemapSearchDropdown) {

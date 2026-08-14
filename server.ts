@@ -29,24 +29,46 @@ async function startServer() {
       const pageNum = parseInt(String(req.query.pageNum || "1"), 10) || 1;
 
       if (!searchVal) {
-        return res.status(400).json({ error: "Missing required query parameter 'searchVal'" });
+        return res.status(400).json({ error: "Missing required query parameter 'searchVal'", results: [] });
       }
 
       const targetUrl = `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${encodeURIComponent(searchVal)}&returnGeom=${returnGeom}&getAddrDetails=${getAddrDetails}&pageNum=${pageNum}`;
       
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 6000);
       const response = await fetch(targetUrl, {
-        headers: { "accept": "application/json", "User-Agent": "ParkFinder-Insight/1.0" },
+        headers: {
+          "accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        },
         signal: controller.signal
       });
       clearTimeout(timeout);
 
-      const json = await response.json();
+      const json: any = await response.json();
+      const rawResults = Array.isArray(json.results) ? json.results : [];
+      const normalizedResults = rawResults.map((r: any) => ({
+        ...r,
+        searchVal: r.SEARCHVAL || r.searchVal || "",
+        building: (r.BUILDING && r.BUILDING !== "NIL") ? r.BUILDING : (r.building || ""),
+        address: r.ADDRESS || r.address || "",
+        road: (r.ROAD_NAME && r.ROAD_NAME !== "NIL") ? r.ROAD_NAME : (r.road || r.roadName || ""),
+        blkNo: (r.BLK_NO && r.BLK_NO !== "NIL") ? r.BLK_NO : (r.blkNo || ""),
+        postal: (r.POSTAL && r.POSTAL !== "NIL") ? r.POSTAL : (r.postal || ""),
+        lat: parseFloat(r.LATITUDE || r.lat || 0),
+        lng: parseFloat(r.LONGITUDE || r.lng || 0)
+      }));
+
       res.setHeader("Content-Type", "application/json");
-      return res.status(response.status).json(json);
+      return res.status(200).json({
+        success: true,
+        found: json.found || normalizedResults.length,
+        totalNumPages: json.totalNumPages || 1,
+        pageNum,
+        results: normalizedResults
+      });
     } catch (err: any) {
-      return res.status(500).json({ error: "OneMap search proxy failure: " + err.message });
+      return res.status(500).json({ error: "OneMap search proxy failure: " + err.message, results: [] });
     }
   });
 

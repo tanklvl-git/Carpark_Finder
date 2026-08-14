@@ -559,10 +559,26 @@ html, body {
   box-shadow: 0 0 0 3px var(--hd-blue-100), var(--hd-shadow-md);
 }
 
-.search-icon {
-  color: var(--hd-text-muted);
-  flex-shrink: 0;
+.search-submit-btn {
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
   margin-right: 8px;
+  color: var(--hd-text-muted);
+  transition: color var(--transition-fast);
+}
+
+.search-submit-btn:hover {
+  color: var(--hd-blue-600);
+}
+
+.search-icon {
+  color: currentColor;
+  flex-shrink: 0;
 }
 
 .onemap-search-input {
