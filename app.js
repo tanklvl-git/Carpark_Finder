@@ -14,20 +14,25 @@ const state = {
   radiusKm: 2.0, // Default search radius: 2.0km (Range: 1.0km - 3.0km)
   evFilterOnly: false, // Default: Show all car parks
   carparks: [], // List of car parks currently within radius
-  googleMap: null, // Google Map instance
-  radiusCircle: null, // Google Maps Circle overlay for radius visualization
-  userMarker: null, // Google Maps Marker for user's GPS position
+  leafMap: null, // Leaflet OneMap instance
+  radiusCircle: null, // Radius circle overlay
+  userMarker: null, // Leaflet User Location Marker
   carparkMarkers: [], // Array of active car park map markers
   refreshIntervalId: null, // 1-Minute Interval Timer ID
   refreshSecondsRemaining: 60, // Countdown timer for 1-minute auto-refresh
   countdownIntervalId: null,
   isFetching: false,
-  isGoogleMapsLoaded: false
+  searchDebounceTimer: null,
+  activeSearchIndex: -1,
+  searchResults: []
 };
 
 // DOM Element References (Cached after DOM Content Loaded)
 const elements = {
   mapContainer: null,
+  onemapSearchInput: null,
+  onemapSearchDropdown: null,
+  clearSearchBtn: null,
   districtSelect: null,
   locateMeBtn: null,
   radiusSlider: null,
@@ -52,9 +57,7 @@ const elements = {
   modalCarparkTitle: null,
   modalCarparkArea: null,
   modalCarparkBody: null,
-  modalNavigateBtn: null,
-  setupAlertCard: null,
-  dismissAlertBtn: null
+  modalNavigateBtn: null
 };
 
 /**
@@ -66,8 +69,8 @@ function initApplication() {
   setupEventListeners();
   startOneMinuteRefreshTimer();
   requestUserGeolocation();
+  initOneMap();
   fetchCarParkData();
-  loadGoogleMapsScript();
 }
 
 /**
@@ -75,7 +78,10 @@ function initApplication() {
  * This avoids repeated document.getElementById calls for better performance.
  */
 function cacheDOMElements() {
-  elements.mapContainer = document.getElementById("google-map-container");
+  elements.mapContainer = document.getElementById("onemap-container") || document.getElementById("google-map-container");
+  elements.onemapSearchInput = document.getElementById("onemap-search-input");
+  elements.onemapSearchDropdown = document.getElementById("onemap-search-dropdown");
+  elements.clearSearchBtn = document.getElementById("clear-search-btn");
   elements.districtSelect = document.getElementById("district-select");
   elements.locateMeBtn = document.getElementById("locate-me-btn");
   elements.radiusSlider = document.getElementById("radius-slider");
@@ -101,8 +107,6 @@ function cacheDOMElements() {
   elements.modalCarparkArea = document.getElementById("modal-carpark-area");
   elements.modalCarparkBody = document.getElementById("modal-carpark-body");
   elements.modalNavigateBtn = document.getElementById("modal-navigate-btn");
-  elements.setupAlertCard = document.getElementById("setup-alert-card");
-  elements.dismissAlertBtn = document.getElementById("dismiss-alert-btn");
 }
 
 /**
@@ -110,6 +114,29 @@ function cacheDOMElements() {
  * No inline JavaScript (such as onclick="...") is used in the HTML markup.
  */
 function setupEventListeners() {
+  // OneMap Search Bar Live Typing & Autocomplete
+  if (elements.onemapSearchInput) {
+    elements.onemapSearchInput.addEventListener("input", handleOneMapSearchInput);
+    elements.onemapSearchInput.addEventListener("keydown", handleOneMapSearchKeyDown);
+    elements.onemapSearchInput.addEventListener("focus", () => {
+      if (state.searchResults.length > 0 && elements.onemapSearchDropdown) {
+        elements.onemapSearchDropdown.hidden = false;
+      }
+    });
+  }
+
+  // Clear Search Input Button
+  if (elements.clearSearchBtn) {
+    elements.clearSearchBtn.addEventListener("click", handleClearSearch);
+  }
+
+  // Close search dropdown on click outside
+  document.addEventListener("click", (e) => {
+    if (elements.onemapSearchDropdown && !e.target.closest("#onemap-search-wrapper")) {
+      elements.onemapSearchDropdown.hidden = true;
+    }
+  });
+
   // Radius Slider Input Event (1.0km to 3.0km)
   if (elements.radiusSlider) {
     elements.radiusSlider.addEventListener("input", handleRadiusSliderInput);
@@ -159,43 +186,298 @@ function setupEventListeners() {
     });
   }
 
-  // Dismiss Alert Button
-  if (elements.dismissAlertBtn) {
-    elements.dismissAlertBtn.addEventListener("click", () => {
-      if (elements.setupAlertCard) {
-        elements.setupAlertCard.hidden = true;
-      }
-    });
-  }
-
   // Close modal on Escape keyboard key (Accessibility WCAG AA)
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !elements.detailModalBackdrop.hidden) {
+    if (e.key === "Escape" && elements.detailModalBackdrop && !elements.detailModalBackdrop.hidden) {
       closeDetailModal();
     }
   });
 }
 
 /**
- * Dynamically loads the Google Maps JavaScript SDK via the secure backend proxy endpoint.
- * This keeps all private credentials on the server side.
+ * Initializes and renders the Singapore OneMap (SLA) via Leaflet.
  */
-function loadGoogleMapsScript() {
-  // Define global callback handler before inserting script tag
-  window.initGoogleMap = function () {
-    state.isGoogleMapsLoaded = true;
-    renderGoogleMap();
-  };
+function initOneMap() {
+  if (!elements.mapContainer) return;
 
-  const script = document.createElement("script");
-  script.src = "/api/maps-js?callback=initGoogleMap";
-  script.async = true;
-  script.defer = true;
-  script.onerror = function () {
-    console.warn("Google Maps JS could not be loaded via proxy. Using interactive visual map canvas.");
-    renderFallbackMapCanvas();
-  };
-  document.head.appendChild(script);
+  // Check if Leaflet library is available
+  if (typeof L === "undefined") {
+    // Retry shortly if script is still loading
+    setTimeout(initOneMap, 150);
+    return;
+  }
+
+  // If map already instantiated, update view
+  if (state.leafMap) {
+    state.leafMap.setView([state.userLocation.lat, state.userLocation.lng], getZoomLevelForRadius(state.radiusKm));
+    return;
+  }
+
+  // Singapore geographic bounds
+  const sgSouthWest = L.latLng(1.15, 103.55);
+  const sgNorthEast = L.latLng(1.48, 104.10);
+  const sgBounds = L.latLngBounds(sgSouthWest, sgNorthEast);
+
+  // Instantiate Leaflet Map centered at target location
+  state.leafMap = L.map(elements.mapContainer, {
+    center: [state.userLocation.lat, state.userLocation.lng],
+    zoom: getZoomLevelForRadius(state.radiusKm),
+    minZoom: 11,
+    maxZoom: 19,
+    maxBounds: sgBounds,
+    zoomControl: false,
+    attributionControl: true
+  });
+
+  // Add custom zoom control at bottom right
+  L.control.zoom({ position: "bottomright" }).addTo(state.leafMap);
+
+  // SLA OneMap Official Raster Tile Service (Default theme)
+  const oneMapDefaultLayer = L.tileLayer("https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png", {
+    minZoom: 11,
+    maxZoom: 19,
+    bounds: sgBounds,
+    attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:14px;vertical-align:middle;margin-right:4px;" alt="OneMap"/> OneMap | &copy; Singapore Land Authority'
+  });
+
+  oneMapDefaultLayer.addTo(state.leafMap);
+
+  // Add Search Radius visual circle overlay
+  state.radiusCircle = L.circle([state.userLocation.lat, state.userLocation.lng], {
+    color: "#2563eb",
+    fillColor: "#2563eb",
+    fillOpacity: 0.08,
+    weight: 2,
+    radius: state.radiusKm * 1000 // Convert km to meters
+  }).addTo(state.leafMap);
+
+  // Add Glowing User GPS / Target Location Pin
+  const userPinHtml = '<div class="onemap-user-pin" title="Current Search Target Location"></div>';
+  const userIcon = L.divIcon({
+    className: "onemap-user-pin-wrapper",
+    html: userPinHtml,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  });
+
+  state.userMarker = L.marker([state.userLocation.lat, state.userLocation.lng], {
+    icon: userIcon,
+    zIndexOffset: 1000
+  }).addTo(state.leafMap);
+
+  // Fix map sizing after render
+  setTimeout(() => {
+    if (state.leafMap) state.leafMap.invalidateSize();
+  }, 200);
+
+  // Render initial car park markers
+  renderCarParkMarkersOnMap();
+}
+
+/**
+ * Handles live typing in the OneMap Search input.
+ * Debounces calls to the OneMap Elastic Search API.
+ */
+function handleOneMapSearchInput(e) {
+  const query = e.target.value.trim();
+
+  // Show or hide clear button
+  if (elements.clearSearchBtn) {
+    elements.clearSearchBtn.hidden = query.length === 0;
+  }
+
+  if (state.searchDebounceTimer) {
+    clearTimeout(state.searchDebounceTimer);
+  }
+
+  if (query.length < 2) {
+    state.searchResults = [];
+    if (elements.onemapSearchDropdown) {
+      elements.onemapSearchDropdown.hidden = true;
+      elements.onemapSearchDropdown.innerHTML = "";
+    }
+    return;
+  }
+
+  // Show loading in dropdown
+  if (elements.onemapSearchDropdown) {
+    elements.onemapSearchDropdown.hidden = false;
+    elements.onemapSearchDropdown.innerHTML = `
+      <div class="onemap-search-loading">
+        Searching OneMap for "<strong>${escapeHtml(query)}</strong>"...
+      </div>
+    `;
+  }
+
+  state.searchDebounceTimer = setTimeout(() => {
+    executeOneMapSearch(query);
+  }, 250);
+}
+
+/**
+ * Calls backend `/api/onemap/search` or `/api/insight?action=search` to fetch real-time Singapore geocoding results.
+ */
+async function executeOneMapSearch(query) {
+  try {
+    const response = await fetch(`/api/onemap/search?searchVal=${encodeURIComponent(query)}&returnGeom=Y&getAddrDetails=Y&pageNum=1`);
+    if (!response.ok) {
+      throw new Error(`Search failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const results = Array.isArray(data.results) ? data.results : [];
+    state.searchResults = results;
+    state.activeSearchIndex = -1;
+
+    renderOneMapSearchResults(results, query);
+  } catch (err) {
+    console.error("OneMap search error:", err);
+    if (elements.onemapSearchDropdown) {
+      elements.onemapSearchDropdown.innerHTML = `
+        <div class="onemap-search-empty">
+          No matches found on OneMap. Try searching a building, street, or postal code.
+        </div>
+      `;
+    }
+  }
+}
+
+/**
+ * Renders the list of OneMap location search suggestions in the dropdown.
+ */
+function renderOneMapSearchResults(results, query) {
+  if (!elements.onemapSearchDropdown) return;
+
+  if (results.length === 0) {
+    elements.onemapSearchDropdown.innerHTML = `
+      <div class="onemap-search-empty">
+        No locations found for "<strong>${escapeHtml(query)}</strong>"
+      </div>
+    `;
+    elements.onemapSearchDropdown.hidden = false;
+    return;
+  }
+
+  const html = results.slice(0, 7).map((item, idx) => {
+    const title = item.building || item.address || item.searchVal || "Unknown Location";
+    const sub = [item.road, item.address].filter(Boolean).join(", ") || "Singapore";
+    const postal = item.postal ? `<span class="onemap-postal-badge">S(${item.postal})</span>` : "";
+
+    return `
+      <div
+        class="onemap-search-item"
+        data-index="${idx}"
+        role="option"
+        id="onemap-opt-${idx}"
+      >
+        <div class="onemap-search-item-title">
+          <span>${escapeHtml(title)}</span>
+          ${postal}
+        </div>
+        <div class="onemap-search-item-sub">${escapeHtml(sub)}</div>
+      </div>
+    `;
+  }).join("");
+
+  elements.onemapSearchDropdown.innerHTML = html;
+  elements.onemapSearchDropdown.hidden = false;
+
+  // Attach click listeners to each suggestion
+  const items = elements.onemapSearchDropdown.querySelectorAll(".onemap-search-item");
+  items.forEach((itemEl) => {
+    itemEl.addEventListener("click", () => {
+      const idx = parseInt(itemEl.dataset.index, 10);
+      selectOneMapSearchResult(state.searchResults[idx]);
+    });
+  });
+}
+
+/**
+ * Handles keyboard navigation (ArrowUp, ArrowDown, Enter, Escape) in the search dropdown.
+ */
+function handleOneMapSearchKeyDown(e) {
+  if (!elements.onemapSearchDropdown || elements.onemapSearchDropdown.hidden) return;
+
+  const items = elements.onemapSearchDropdown.querySelectorAll(".onemap-search-item");
+  if (items.length === 0) return;
+
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    state.activeSearchIndex = (state.activeSearchIndex + 1) % items.length;
+    updateActiveSearchItem(items);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    state.activeSearchIndex = (state.activeSearchIndex - 1 + items.length) % items.length;
+    updateActiveSearchItem(items);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (state.activeSearchIndex >= 0 && state.activeSearchIndex < state.searchResults.length) {
+      selectOneMapSearchResult(state.searchResults[state.activeSearchIndex]);
+    } else if (state.searchResults.length > 0) {
+      selectOneMapSearchResult(state.searchResults[0]);
+    }
+  } else if (e.key === "Escape") {
+    elements.onemapSearchDropdown.hidden = true;
+  }
+}
+
+/**
+ * Updates visual highlight of the active search item during arrow key navigation.
+ */
+function updateActiveSearchItem(items) {
+  items.forEach((item, idx) => {
+    if (idx === state.activeSearchIndex) {
+      item.classList.add("active");
+      item.scrollIntoView({ block: "nearest" });
+    } else {
+      item.classList.remove("active");
+    }
+  });
+}
+
+/**
+ * Selects a location from OneMap search and centers the map & radius.
+ */
+function selectOneMapSearchResult(item) {
+  if (!item) return;
+
+  const lat = parseFloat(item.lat || item.LATITUDE);
+  const lng = parseFloat(item.lng || item.LONGITUDE);
+
+  if (isNaN(lat) || isNaN(lng)) return;
+
+  state.userLocation = { lat, lng };
+  const locName = item.building || item.road || item.address || item.searchVal || "Selected Location";
+
+  if (elements.onemapSearchInput) {
+    elements.onemapSearchInput.value = locName;
+  }
+
+  if (elements.onemapSearchDropdown) {
+    elements.onemapSearchDropdown.hidden = true;
+  }
+
+  updateLocationDisplayText(`${locName} (${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E)`);
+  updateMapCenterAndRadius();
+  fetchCarParkData();
+}
+
+/**
+ * Clears the OneMap search input.
+ */
+function handleClearSearch() {
+  if (elements.onemapSearchInput) {
+    elements.onemapSearchInput.value = "";
+    elements.onemapSearchInput.focus();
+  }
+  if (elements.clearSearchBtn) {
+    elements.clearSearchBtn.hidden = true;
+  }
+  if (elements.onemapSearchDropdown) {
+    elements.onemapSearchDropdown.hidden = true;
+    elements.onemapSearchDropdown.innerHTML = "";
+  }
+  state.searchResults = [];
 }
 
 /**
@@ -223,11 +505,7 @@ function requestUserGeolocation() {
         updateLocationDisplayText("Singapore CBD (1.2903° N, 103.8520° E)");
       }
 
-      if (state.googleMap) {
-        state.googleMap.setCenter(state.userLocation);
-        updateUserMapMarker();
-        updateRadiusCircle();
-      }
+      updateMapCenterAndRadius();
       fetchCarParkData();
     },
     (error) => {
@@ -250,108 +528,47 @@ function updateLocationDisplayText(locationText) {
 }
 
 /**
- * Initializes and renders the Google Map inside the map container.
+ * Updates map center, user location marker, and radius circle.
  */
-function renderGoogleMap() {
-  if (!window.google || !window.google.maps || !elements.mapContainer) {
-    return;
-  }
+function updateMapCenterAndRadius() {
+  if (!state.leafMap) return;
 
-  // Create Google Map instance centered at user's location
-  state.googleMap = new google.maps.Map(elements.mapContainer, {
-    center: state.userLocation,
-    zoom: getZoomLevelForRadius(state.radiusKm),
-    mapTypeControl: false,
-    streetViewControl: false,
-    fullscreenControl: false,
-    zoomControl: true,
-    styles: [
-      { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
-      { featureType: "transit", elementType: "labels", stylers: [{ visibility: "simplified" }] }
-    ]
+  state.leafMap.setView([state.userLocation.lat, state.userLocation.lng], getZoomLevelForRadius(state.radiusKm), {
+    animate: true,
+    duration: 0.5
   });
-
-  // Create Radius visual circle overlay (Semi-transparent blue area)
-  state.radiusCircle = new google.maps.Circle({
-    strokeColor: "#0b57d0",
-    strokeOpacity: 0.8,
-    strokeWeight: 2,
-    fillColor: "#0b57d0",
-    fillOpacity: 0.08,
-    map: state.googleMap,
-    center: state.userLocation,
-    radius: state.radiusKm * 1000 // Convert km to meters
-  });
-
-  // Create User GPS Position Marker (Glowing blue dot)
-  renderUserLocationMarker();
-
-  // Render Car Park Markers on the Map
-  renderCarParkMarkersOnMap();
-}
-
-/**
- * Renders the glowing blue marker for the user's location on the Google Map.
- */
-function renderUserLocationMarker() {
-  if (!state.googleMap || !window.google) return;
-
-  // Custom User Location Pin using SVG icon
-  const userPinSvg = {
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: 8,
-    fillColor: "#1a73e8",
-    fillOpacity: 1,
-    strokeColor: "#ffffff",
-    strokeWeight: 3
-  };
 
   if (state.userMarker) {
-    state.userMarker.setPosition(state.userLocation);
-  } else {
-    state.userMarker = new google.maps.Marker({
-      position: state.userLocation,
-      map: state.googleMap,
-      title: "Your Location",
-      icon: userPinSvg,
-      zIndex: 1000
-    });
+    state.userMarker.setLatLng([state.userLocation.lat, state.userLocation.lng]);
+  }
+
+  if (state.radiusCircle) {
+    state.radiusCircle.setLatLng([state.userLocation.lat, state.userLocation.lng]);
+    state.radiusCircle.setRadius(state.radiusKm * 1000);
   }
 }
 
 /**
- * Calculates optimal Google Maps zoom level based on the radius in kilometers.
+ * Calculates optimal OneMap zoom level based on the radius in kilometers.
  * 
  * @param {number} radiusKm - Radius in kilometers
- * @returns {number} Appropriate Google Maps zoom level (14 to 16)
+ * @returns {number} Appropriate zoom level (13 to 16)
  */
 function getZoomLevelForRadius(radiusKm) {
-  if (radiusKm <= 1.2) return 15;
-  if (radiusKm <= 2.2) return 14;
-  return 13;
+  if (radiusKm <= 1.2) return 16;
+  if (radiusKm <= 2.2) return 15;
+  return 14;
 }
 
 /**
- * Updates the user location marker and centers the map.
- */
-function updateUserMapMarker() {
-  if (state.userMarker) {
-    state.userMarker.setPosition(state.userLocation);
-  }
-  if (state.radiusCircle) {
-    state.radiusCircle.setCenter(state.userLocation);
-  }
-}
-
-/**
- * Updates the radius circle overlay on the Google Map when the slider changes.
+ * Updates the radius circle overlay on the OneMap when the slider changes.
  */
 function updateRadiusCircle() {
   if (state.radiusCircle) {
     state.radiusCircle.setRadius(state.radiusKm * 1000);
   }
-  if (state.googleMap) {
-    state.googleMap.setZoom(getZoomLevelForRadius(state.radiusKm));
+  if (state.leafMap) {
+    state.leafMap.setZoom(getZoomLevelForRadius(state.radiusKm));
   }
 }
 
@@ -399,97 +616,101 @@ async function fetchCarParkData() {
 }
 
 /**
- * Renders custom colored car park markers on the Google Map.
+ * Renders custom colored car park markers on the OneMap Leaflet map.
  * Applies color coding rules:
  * - Red: < 5 lots
  * - Orange: < 10 lots (5 to 9)
  * - Green: >= 10 lots
  */
 function renderCarParkMarkersOnMap() {
-  if (!state.googleMap || !window.google) {
+  if (!state.leafMap || typeof L === "undefined") {
     renderFallbackMapCanvas();
     return;
   }
 
   // Clear existing car park markers from the map
-  state.carparkMarkers.forEach((m) => m.setMap(null));
+  state.carparkMarkers.forEach((m) => {
+    if (state.leafMap) state.leafMap.removeLayer(m);
+  });
   state.carparkMarkers = [];
 
-  // Create an InfoWindow instance for marker clicks
-  const infoWindow = new google.maps.InfoWindow();
-
   state.carparks.forEach((cp) => {
-    // Determine pin color: red (< 5), orange (< 10), green (>= 10)
-    let pinColor = "#10b981"; // Emerald green
+    // Determine pin color class: red (< 5), orange (< 10), green (>= 10)
+    let pinColorClass = "pin-green";
+    let pinColorHex = "#10b981";
     if (cp.availableLots < 5) {
-      pinColor = "#f43f5e"; // Rose red
+      pinColorClass = "pin-red";
+      pinColorHex = "#f43f5e";
     } else if (cp.availableLots < 10) {
-      pinColor = "#f59e0b"; // Amber orange
+      pinColorClass = "pin-orange";
+      pinColorHex = "#f59e0b";
     }
 
-    // Create custom SVG marker label and icon
-    const markerIcon = {
-      path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
-      fillColor: pinColor,
-      fillOpacity: 1,
-      strokeColor: "#ffffff",
-      strokeWeight: 2,
-      scale: 1.8,
-      anchor: new google.maps.Point(12, 22),
-      labelOrigin: new google.maps.Point(12, 9)
-    };
+    const lotsDisplay = cp.availableLots > 99 ? "99+" : String(cp.availableLots);
+    const evIconHtml = cp.hasEV ? '<div class="onemap-ev-badge-icon" title="EV Charging Station Available">⚡</div>' : "";
 
-    const marker = new google.maps.Marker({
-      position: { lat: cp.lat, lng: cp.lng },
-      map: state.googleMap,
-      title: `${cp.name} (${cp.availableLots} lots)`,
-      icon: markerIcon,
-      label: {
-        text: cp.availableLots > 99 ? "99+" : String(cp.availableLots),
-        color: "#ffffff",
-        fontSize: "11px",
-        fontWeight: "bold"
+    const markerHtml = `
+      <div class="onemap-carpark-pin ${pinColorClass}" style="width:36px;height:24px;">
+        ${lotsDisplay}
+        ${evIconHtml}
+      </div>
+    `;
+
+    const customIcon = L.divIcon({
+      className: "onemap-carpark-marker-wrapper",
+      html: markerHtml,
+      iconSize: [36, 24],
+      iconAnchor: [18, 12]
+    });
+
+    const marker = L.marker([cp.lat, cp.lng], { icon: customIcon });
+
+    // Popup card content
+    const evTagHtml = cp.hasEV
+      ? `<div style="margin-top:4px;margin-bottom:8px;padding:3px 8px;background:#dbeafe;color:#1d4ed8;border-radius:4px;font-size:11px;font-weight:700;display:inline-block;">⚡ EV CHARGING AVAILABLE</div>`
+      : "";
+
+    const popupHtml = `
+      <div class="onemap-popup-card">
+        <div class="onemap-popup-title">${escapeHtml(cp.name)}</div>
+        <div class="onemap-popup-sub">${escapeHtml(cp.area)} &bull; ${cp.distanceKm} km away</div>
+        <div>
+          <span class="onemap-popup-lots" style="background-color:${pinColorHex};">
+            ${cp.availableLots} Lots Available (${cp.lotType})
+          </span>
+        </div>
+        ${evTagHtml}
+        <button type="button" class="onemap-popup-btn" id="onemap-popup-btn-${cp.id}">
+          View Details &amp; Rates
+        </button>
+      </div>
+    `;
+
+    marker.bindPopup(popupHtml, { maxWidth: 260, offset: [0, -10] });
+
+    marker.on("popupopen", () => {
+      const btn = document.getElementById(`onemap-popup-btn-${cp.id}`);
+      if (btn) {
+        btn.onclick = () => openDetailModal(cp);
       }
     });
 
-    // Marker click event listener: opens InfoWindow & details
-    marker.addListener("click", () => {
-      const evTagHtml = cp.hasEV
-        ? `<div style="margin-top:6px;padding:3px 8px;background:#dbeafe;color:#1d4ed8;border-radius:4px;font-size:11px;font-weight:700;display:inline-block;">⚡ EV CHARGING AVAILABLE</div>`
-        : "";
-
-      const contentString = `
-        <div style="font-family:'Plus Jakarta Sans',sans-serif;padding:6px;max-width:240px;color:#0f172a;">
-          <strong style="font-size:14px;color:#0f172a;display:block;margin-bottom:2px;">${cp.name}</strong>
-          <div style="font-size:12px;color:#64748b;margin-bottom:6px;">${cp.area} &bull; ${cp.distanceKm} km away</div>
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-            <span style="background:${pinColor};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">
-              ${cp.availableLots} Lots Available
-            </span>
-          </div>
-          ${evTagHtml}
-          <div style="margin-top:8px;">
-            <button id="infowindow-btn-${cp.id}" style="background:#2563eb;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;width:100%;">
-              View Details &amp; Rates
-            </button>
-          </div>
-        </div>
-      `;
-
-      infoWindow.setContent(contentString);
-      infoWindow.open(state.googleMap, marker);
-
-      // Attach click event to InfoWindow's dynamic button
-      google.maps.event.addListenerOnce(infoWindow, "domready", () => {
-        const btn = document.getElementById(`infowindow-btn-${cp.id}`);
-        if (btn) {
-          btn.addEventListener("click", () => openDetailModal(cp));
-        }
-      });
-    });
-
+    marker.addTo(state.leafMap);
     state.carparkMarkers.push(marker);
   });
+}
+
+/**
+ * Escapes HTML characters to prevent XSS.
+ */
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /**
@@ -734,6 +955,7 @@ function handleEVFilterToggle() {
  * @param {Event} e - Change event
  */
 function handleDistrictSelectChange(e) {
+  if (!e.target.value) return;
   const [latStr, lngStr] = e.target.value.split(",");
   const lat = parseFloat(latStr);
   const lng = parseFloat(lngStr);
@@ -741,13 +963,16 @@ function handleDistrictSelectChange(e) {
   if (!isNaN(lat) && !isNaN(lng)) {
     state.userLocation = { lat, lng };
     const selectedOptionText = e.target.options[e.target.selectedIndex].text;
-    updateLocationDisplayText(selectedOptionText);
-
-    if (state.googleMap) {
-      state.googleMap.setCenter(state.userLocation);
-      updateUserMapMarker();
-      updateRadiusCircle();
+    
+    if (elements.onemapSearchInput) {
+      elements.onemapSearchInput.value = selectedOptionText;
     }
+    if (elements.clearSearchBtn) {
+      elements.clearSearchBtn.hidden = false;
+    }
+
+    updateLocationDisplayText(`${selectedOptionText} (${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E)`);
+    updateMapCenterAndRadius();
     fetchCarParkData();
   }
 }

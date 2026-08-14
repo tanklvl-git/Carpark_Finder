@@ -16,9 +16,24 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+
+    <!-- Leaflet Map CSS for Singapore OneMap integration -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
     
     <!-- Application Stylesheet -->
     <link rel="stylesheet" href="/styles.css" />
+    
+    <!-- Leaflet Map JS Library -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
   </head>
   <body class="h-full m-0 bg-[#f8fafc] text-slate-900 font-sans overflow-hidden">
     <!-- Accessibility Skip Link for Keyboard Navigation (WCAG 2.1 AA) -->
@@ -112,27 +127,72 @@
         </div>
       </aside>
 
-      <!-- Interactive Map Section -->
-      <section class="map-viewport" id="map-section" aria-label="Interactive Map of Singapore Car Parks">
+      <!-- Interactive Map Section (OneMap SLA Base Layer) -->
+      <section class="map-viewport" id="map-section" aria-label="Interactive OneMap of Singapore Car Parks">
         
-        <!-- Google Map Mount Element -->
-        <div id="google-map-container" class="map-canvas" role="region" aria-label="Google Map View"></div>
+        <!-- OneMap Leaflet Map Canvas -->
+        <div id="onemap-container" class="map-canvas" role="region" aria-label="Singapore OneMap View"></div>
 
-        <!-- Floating Quick District Jump Selector -->
-        <div class="map-floating-panel top-left-panel" id="district-selector-panel">
-          <label for="district-select" class="floating-label">Area Jump:</label>
-          <select id="district-select" class="high-density-select" aria-label="Select Singapore district to view car parks">
-            <option value="1.290270,103.851959" selected>City Hall / CBD</option>
-            <option value="1.304000,103.831900">Orchard Road</option>
-            <option value="1.283400,103.860700">Marina Bay Sands</option>
-            <option value="1.299800,103.855500">Bugis / Bras Basah</option>
-            <option value="1.264400,103.822200">HarbourFront / Sentosa</option>
-            <option value="1.333100,103.743600">Jurong East (Jem/Westgate)</option>
-            <option value="1.353300,103.945200">Tampines Central</option>
-            <option value="1.360200,103.989800">Jewel Changi Airport</option>
-            <option value="1.350600,103.872400">Serangoon / NEX</option>
-            <option value="1.429600,103.835900">Yishun / Northpoint</option>
-          </select>
+        <!-- Floating OneMap Search & District Selector Panel -->
+        <div class="map-floating-panel top-search-panel" id="onemap-search-panel">
+          <div class="onemap-search-wrapper" id="onemap-search-wrapper">
+            <div class="onemap-search-input-group">
+              <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+              <input
+                type="text"
+                id="onemap-search-input"
+                class="onemap-search-input"
+                placeholder="Search Singapore place (e.g. Raffles Place, Orchard, postal code)..."
+                autocomplete="off"
+                aria-autocomplete="list"
+                aria-controls="onemap-search-dropdown"
+                aria-label="Search Singapore location using OneMap SLA"
+              />
+              <button
+                type="button"
+                id="clear-search-btn"
+                class="clear-search-btn"
+                title="Clear search input"
+                aria-label="Clear location search"
+                hidden
+              >
+                &times;
+              </button>
+            </div>
+
+            <!-- Real-time OneMap Elastic Autocomplete Dropdown List -->
+            <div
+              id="onemap-search-dropdown"
+              class="onemap-search-dropdown custom-scrollbar"
+              role="listbox"
+              aria-label="OneMap search results"
+              hidden
+            >
+              <!-- Populated dynamically via OneMap search API -->
+            </div>
+          </div>
+
+          <!-- Quick Area Jump Selector -->
+          <div class="district-select-wrapper">
+            <label for="district-select" class="floating-label sr-only">Area Jump</label>
+            <select id="district-select" class="high-density-select" aria-label="Select Singapore district preset">
+              <option value="" disabled selected>Presets</option>
+              <option value="1.28208,103.85156">Raffles Place (CBD)</option>
+              <option value="1.290270,103.851959">City Hall / Suntec</option>
+              <option value="1.304000,103.831900">Orchard Road</option>
+              <option value="1.283400,103.860700">Marina Bay Sands</option>
+              <option value="1.299800,103.855500">Bugis / Bras Basah</option>
+              <option value="1.264400,103.822200">HarbourFront / VivoCity</option>
+              <option value="1.333100,103.743600">Jurong East (Jem/Westgate)</option>
+              <option value="1.353300,103.945200">Tampines Central</option>
+              <option value="1.360200,103.989800">Jewel Changi Airport</option>
+              <option value="1.350600,103.872400">Serangoon / NEX</option>
+              <option value="1.429600,103.835900">Yishun / Northpoint</option>
+              <option value="1.369100,103.845400">Ang Mo Kio Hub</option>
+            </select>
+          </div>
         </div>
 
         <!-- Floating Recenter to User's GPS Location Button -->
@@ -152,7 +212,7 @@
 
         <!-- Color Coding Availability Legend Floating Card -->
         <div class="map-floating-panel legend-panel" id="color-legend-card" role="region" aria-label="Car park lot status color legend">
-          <span class="legend-title">Lot Availability:</span>
+          <span class="legend-title">OneMap Availability:</span>
           <div class="legend-items-row">
             <div class="legend-chip legend-red">
               <span class="legend-dot dot-red" aria-hidden="true"></span>

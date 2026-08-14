@@ -872,43 +872,137 @@ function getSimulatedLiveLots(carpark) {
   return Math.max(0, Math.min(computed, carpark.totalLots));
 }
 
+// Cache store for live car park data across HDB, LTA, URA, and Commercial sources
+let liveDataMallCache = {
+  timestamp: 0,
+  data: null
+};
+
+const LTA_DATAMALL_ENDPOINT = "https://datamall2.mytransport.sg/ltaodataservice/CarParkAvailabilityv2";
+const DEFAULT_LTA_ACCOUNT_KEY = "8af2539bdb2799058e6d137fa4c36cf3";
+
 /**
- * Fetches real-time carpark availability from official LTA DataMall API if account key is set.
- * Falls back gracefully to the verified high-accuracy Singapore registry.
+ * Fetches real-time carpark availability from official LTA DataMall API:
+ * URL: https://datamall2.mytransport.sg/ltaodataservice/CarParkAvailabilityv2
+ * Required Header: AccountKey: 8af2539bdb2799058e6d137fa4c36cf3
  * 
- * @param {string} apiKey - Optional LTA DataMall AccountKey
+ * Includes pagination support ($skip) to retrieve HDB, LTA, and URA car parks island-wide.
+ * 
+ * @param {string} apiKey - Optional LTA DataMall AccountKey override
  * @returns {Promise<Array>} List of raw carparks
  */
 async function fetchLTADataMall(apiKey) {
-  if (!apiKey) {
-    return null;
-  }
+  const accountKey = (apiKey && apiKey !== "MY_LTA_DATAMALL_KEY") ? apiKey : (process.env.LTA_DATAMALL_KEY || DEFAULT_LTA_ACCOUNT_KEY);
   
+  // Return cached result if fresh within 30 seconds
+  const now = Date.now();
+  if (liveDataMallCache.data && (now - liveDataMallCache.timestamp) < 30000) {
+    return liveDataMallCache.data;
+  }
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    
-    const response = await fetch("http://datamall2.mytransport.sg/ltaodataservice/CarParkAvailabilityv2", {
-      headers: {
-        "AccountKey": apiKey,
-        "accept": "application/json"
-      },
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeout);
-    
-    if (!response.ok) {
-      console.warn(`LTA DataMall API returned status ${response.status}`);
-      return null;
+    const allCarparks = [];
+    let skip = 0;
+    let hasMore = true;
+    const maxPages = 6; // Up to 3,000 car parks
+
+    while (hasMore && (skip / 500) < maxPages) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4500);
+      
+      const url = skip > 0 ? `${LTA_DATAMALL_ENDPOINT}?$skip=${skip}` : LTA_DATAMALL_ENDPOINT;
+      
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "AccountKey": accountKey,
+          "accept": "application/json"
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        // If 401 or non-200, log warning and stop paginating
+        console.warn(`LTA DataMall API (${url}) responded with HTTP ${response.status}`);
+        break;
+      }
+
+      const json = await response.json();
+      if (json && Array.isArray(json.value) && json.value.length > 0) {
+        allCarparks.push(...json.value);
+        if (json.value.length < 500) {
+          hasMore = false;
+        } else {
+          skip += 500;
+        }
+      } else {
+        hasMore = false;
+      }
     }
-    
-    const data = await response.json();
-    if (data && Array.isArray(data.value)) {
-      return data.value;
+
+    if (allCarparks.length > 0) {
+      liveDataMallCache = {
+        timestamp: now,
+        data: allCarparks
+      };
+      return allCarparks;
     }
   } catch (error) {
-    console.warn("LTA DataMall fetch bypassed or timed out, using verified registry:", error.message);
+    console.warn("LTA DataMall CarParkAvailabilityv2 fetch encountered error, using live sync & registry fallback:", error.message);
+  }
+
+  return null;
+}
+
+/**
+ * Secondary real-time HDB live availability sync from open Data.gov.sg API
+ * Used to supplement or fallback live lot counts for HDB carparks across Singapore.
+ */
+let dataGovCache = {
+  timestamp: 0,
+  data: null
+};
+
+async function fetchDataGovAvailability() {
+  const now = Date.now();
+  if (dataGovCache.data && (now - dataGovCache.timestamp) < 30000) {
+    return dataGovCache.data;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch("https://api.data.gov.sg/v1/transport/carpark-availability", {
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const json = await res.json();
+      const items = json?.items?.[0]?.carpark_data;
+      if (Array.isArray(items)) {
+        const map = new Map();
+        for (const item of items) {
+          const lotInfo = item.carpark_info?.[0];
+          if (lotInfo && lotInfo.lots_available !== undefined) {
+            map.set(item.carpark_number, {
+              availableLots: parseInt(lotInfo.lots_available, 10) || 0,
+              totalLots: parseInt(lotInfo.total_lots, 10) || 0,
+              lotType: lotInfo.lot_type || "C",
+              updatedAt: item.update_datetime
+            });
+          }
+        }
+        dataGovCache = {
+          timestamp: now,
+          data: map
+        };
+        return map;
+      }
+    }
+  } catch (e) {
+    // Non-fatal fallback
   }
   return null;
 }
@@ -923,7 +1017,7 @@ export default async function handler(req, res) {
   // CORS & Security headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, AccountKey");
   res.setHeader("Content-Type", "application/json");
 
   if (req.method === "OPTIONS") {
@@ -934,14 +1028,17 @@ export default async function handler(req, res) {
     const query = req.query || {};
     const action = (query.action || "carparks").toString().trim();
 
-    // 1. Action: Return public config (Google Maps Key presence, status)
+    // 1. Action: Return public config (OneMap & Google Maps Key presence, status)
     if (action === "config") {
       const gmpKey = process.env.GOOGLE_MAPS_PLATFORM_KEY || "";
-      const ltaKey = process.env.LTA_DATAMALL_KEY || "";
+      const ltaKey = process.env.LTA_DATAMALL_KEY || DEFAULT_LTA_ACCOUNT_KEY;
       return res.status(200).json({
         success: true,
+        mapProvider: "OneMap",
+        oneMapSearchEndpoint: "https://www.onemap.gov.sg/api/common/elastic/search",
         hasGoogleMapsKey: Boolean(gmpKey && gmpKey !== "MY_GOOGLE_MAPS_KEY" && gmpKey !== "YOUR_API_KEY"),
-        hasLTAKey: Boolean(ltaKey && ltaKey !== "MY_LTA_DATAMALL_KEY"),
+        hasLTAKey: Boolean(ltaKey),
+        ltaEndpoint: LTA_DATAMALL_ENDPOINT,
         defaultCoordinates: {
           lat: SG_BOUNDS.defaultLat,
           lng: SG_BOUNDS.defaultLng,
@@ -951,7 +1048,70 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2. Action: Retrieve Car Park and EV Charging Availability
+    // 2. Action: OneMap Search API (Geocoding & Location Autocomplete)
+    if (action === "search" || action === "onemap-search") {
+      const searchVal = (query.searchVal || query.q || "").toString().trim();
+      const pageNum = parseInt(query.pageNum || "1", 10) || 1;
+
+      if (!searchVal) {
+        return res.status(400).json({
+          success: false,
+          error: "Search parameter 'searchVal' or 'q' is required."
+        });
+      }
+
+      try {
+        const oneMapUrl = `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${encodeURIComponent(searchVal)}&returnGeom=Y&getAddrDetails=Y&pageNum=${pageNum}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+
+        const response = await fetch(oneMapUrl, {
+          method: "GET",
+          headers: {
+            "accept": "application/json",
+            "User-Agent": "ParkFinder-Insight/1.0"
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return res.status(response.status).json({
+            success: false,
+            error: `OneMap API responded with status ${response.status}`
+          });
+        }
+
+        const data = await response.json();
+        return res.status(200).json({
+          success: true,
+          query: searchVal,
+          pageNum: pageNum,
+          totalResults: data.found || (data.results ? data.results.length : 0),
+          totalPages: data.totalNumPages || 1,
+          results: (data.results || []).map(r => ({
+            searchVal: r.SEARCHVAL,
+            building: r.BUILDING !== "NIL" ? r.BUILDING : "",
+            address: r.ADDRESS,
+            roadName: r.ROAD_NAME !== "NIL" ? r.ROAD_NAME : "",
+            blkNo: r.BLK_NO !== "NIL" ? r.BLK_NO : "",
+            postal: r.POSTAL !== "NIL" ? r.POSTAL : "",
+            lat: parseFloat(r.LATITUDE),
+            lng: parseFloat(r.LONGITUDE),
+            x: r.X,
+            y: r.Y
+          }))
+        });
+      } catch (err) {
+        console.error("OneMap Search fetch error:", err);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to query OneMap search service: " + err.message
+        });
+      }
+    }
+
+    // 3. Action: Retrieve Car Park and EV Charging Availability
     // Server-side validation of Latitude
     let lat = parseFloat(query.lat);
     if (isNaN(lat)) {
@@ -986,12 +1146,71 @@ export default async function handler(req, res) {
     // Server-side validation of EV filter toggle
     const evOnly = query.evOnly === "true" || query.evOnly === true || query.evOnly === "1";
 
-    // Attempt live LTA fetch if configured
-    const ltaApiKey = process.env.LTA_DATAMALL_KEY;
-    const ltaLiveResults = await fetchLTADataMall(ltaApiKey);
+    // Attempt live LTA CarParkAvailabilityv2 fetch using the specified AccountKey header
+    const ltaApiKey = process.env.LTA_DATAMALL_KEY || DEFAULT_LTA_ACCOUNT_KEY;
+    const [ltaLiveResults, dataGovMap] = await Promise.all([
+      fetchLTADataMall(ltaApiKey),
+      fetchDataGovAvailability()
+    ]);
 
-    // Map LTA live data into structured items or blend with verified registry
-    const carparksProcessed = SG_CARPARK_REGISTRY.map((cp) => {
+    let combinedCarparks = [];
+
+    // If LTA DataMall returned live items, process them into our standardized model
+    if (ltaLiveResults && Array.isArray(ltaLiveResults) && ltaLiveResults.length > 0) {
+      for (const item of ltaLiveResults) {
+        if (!item.Location) continue;
+        const coords = item.Location.trim().split(/\s+/);
+        if (coords.length < 2) continue;
+        const cpLat = parseFloat(coords[0]);
+        const cpLng = parseFloat(coords[1]);
+        if (isNaN(cpLat) || isNaN(cpLng)) continue;
+
+        const distanceKm = calculateHaversineDistanceKm(lat, lng, cpLat, cpLng);
+        // Only include if within 5km of query point
+        if (distanceKm > Math.max(radius + 1.0, 3.5)) continue;
+
+        const availableLots = typeof item.AvailableLots === "number" ? Math.max(0, item.AvailableLots) : 0;
+        const agency = item.Agency || (item.Development && item.Development.startsWith("BLK") ? "HDB" : "LTA");
+        const lotStatus = getLotStatusInfo(availableLots);
+
+        // Check if there is an EV charging match in our registry
+        const devName = item.Development || `Car Park ${item.CarParkID}`;
+        const registryMatch = SG_CARPARK_REGISTRY.find(
+          (reg) => reg.carParkId === item.CarParkID || devName.toLowerCase().includes(reg.name.toLowerCase().substring(0, 8))
+        );
+
+        const hasEV = registryMatch ? registryMatch.hasEV : false;
+        const evDetails = registryMatch ? registryMatch.evDetails : null;
+        const rate = registryMatch ? registryMatch.rate : (agency === "HDB" ? "$0.60 per 30 mins" : "$2.40/hr (Mon-Sat)");
+
+        combinedCarparks.push({
+          id: `LTA_${item.CarParkID}_${item.LotType || "C"}`,
+          carParkId: item.CarParkID,
+          name: devName,
+          area: item.Area || (registryMatch ? registryMatch.area : "Singapore"),
+          agency: agency,
+          lat: cpLat,
+          lng: cpLng,
+          distanceKm: Math.round(distanceKm * 100) / 100,
+          distanceMeters: Math.round(distanceKm * 1000),
+          availableLots: availableLots,
+          totalLots: registryMatch ? registryMatch.totalLots : Math.max(availableLots, 100),
+          lotType: item.LotType === "C" ? "Car" : (item.LotType === "H" ? "Heavy" : "Motorcycle"),
+          rate: rate,
+          hasEV: hasEV,
+          evDetails: evDetails,
+          status: lotStatus.status,
+          color: lotStatus.colorName,
+          colorHex: lotStatus.colorHex,
+          badgeClass: lotStatus.badgeClass,
+          ariaLabel: `${devName}: ${availableLots} lots available (${agency}), ${lotStatus.colorName} status, ${Math.round(distanceKm * 10) / 10} km away`,
+          isLiveFromLTA: true
+        });
+      }
+    }
+
+    // Blend with verified high-density Singapore registry
+    const registryProcessed = SG_CARPARK_REGISTRY.map((cp) => {
       let availableLots = getSimulatedLiveLots(cp);
       let isLiveFromLTA = false;
 
@@ -1002,6 +1221,12 @@ export default async function handler(req, res) {
         );
         if (ltaMatch && typeof ltaMatch.AvailableLots === "number") {
           availableLots = ltaMatch.AvailableLots;
+          isLiveFromLTA = true;
+        }
+      } else if (dataGovMap && cp.carParkId && dataGovMap.has(cp.carParkId)) {
+        const govMatch = dataGovMap.get(cp.carParkId);
+        if (govMatch && typeof govMatch.availableLots === "number") {
+          availableLots = govMatch.availableLots;
           isLiveFromLTA = true;
         }
       }
@@ -1034,8 +1259,20 @@ export default async function handler(req, res) {
       };
     });
 
+    // Merge without duplicates by carParkId or name
+    const seenIds = new Set();
+    const finalCarparks = [];
+
+    for (const cp of [...combinedCarparks, ...registryProcessed]) {
+      const key = `${cp.carParkId || cp.name}_${Math.round(cp.lat * 1000)}_${Math.round(cp.lng * 1000)}`;
+      if (!seenIds.has(key)) {
+        seenIds.add(key);
+        finalCarparks.push(cp);
+      }
+    }
+
     // Filter by Radius (1 to 3km)
-    let filtered = carparksProcessed.filter((cp) => cp.distanceKm <= radius);
+    let filtered = finalCarparks.filter((cp) => cp.distanceKm <= radius);
 
     // Filter by EV charging toggle if enabled
     if (evOnly) {
@@ -1055,6 +1292,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       timestamp: new Date().toISOString(),
+      source: "LTA DataMall & Singapore Open Data Transport",
+      endpoint: LTA_DATAMALL_ENDPOINT,
       userLocation: { lat, lng },
       radiusKm: radius,
       evOnly: evOnly,
