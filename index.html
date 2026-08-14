@@ -8,6 +8,60 @@
       name="description"
       content="Real-time car park lot availability and EV charging stations across Singapore within 1 to 3km radius with high-density data analytics."
     />
+
+    <!-- Global Error Shield for Third-Party & Cross-Origin Sandboxed Scripts (Disqus, Clarity, Leaflet) -->
+    <script>
+      (function () {
+        // Intercept error events at the capture phase to prevent cross-origin noise from bubbling
+        window.addEventListener(
+          "error",
+          function (event) {
+            var msg = (event && event.message) || "";
+            var src = (event && event.filename) || "";
+            if (
+              msg === "Script error." ||
+              msg.indexOf("Script error") !== -1 ||
+              src.indexOf("clarity.ms") !== -1 ||
+              src.indexOf("disqus") !== -1 ||
+              src.indexOf("unpkg.com") !== -1
+            ) {
+              if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+              if (event.preventDefault) event.preventDefault();
+              return true;
+            }
+          },
+          true
+        );
+
+        window.onerror = function (message, source, lineno, colno, error) {
+          if (
+            message === "Script error." ||
+            (typeof message === "string" && message.indexOf("Script error") !== -1) ||
+            (source && (source.indexOf("clarity.ms") !== -1 || source.indexOf("disqus") !== -1))
+          ) {
+            return true;
+          }
+          return false;
+        };
+
+        window.addEventListener(
+          "unhandledrejection",
+          function (event) {
+            var reason = event && event.reason;
+            var reasonStr = reason ? (reason.message || String(reason)) : "";
+            if (
+              reasonStr.indexOf("Script error") !== -1 ||
+              reasonStr.indexOf("clarity") !== -1 ||
+              reasonStr.indexOf("disqus") !== -1
+            ) {
+              if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+              if (event.preventDefault) event.preventDefault();
+            }
+          },
+          true
+        );
+      })();
+    </script>
     
     <!-- Google Fonts: Inter / Plus Jakarta Sans / Roboto for high density typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -27,30 +81,18 @@
     
     <!-- Application Stylesheet -->
     <link rel="stylesheet" href="/styles.css" />
-
-    <!-- Global Error Shield for Third-Party / Cross-Origin Scripts (e.g. Disqus) -->
-    <script>
-      window.onerror = function (message, source, lineno, colno, error) {
-        if (message === "Script error." || (source && source.includes("disqus"))) {
-          console.warn("Suppressed external script event:", message, source);
-          return true;
-        }
-        return false;
-      };
-      window.addEventListener("unhandledrejection", function (event) {
-        if (event.reason && (event.reason.message === "Script error." || String(event.reason).includes("disqus"))) {
-          event.preventDefault();
-        }
-      });
-    </script>
     
     <!-- Microsoft Clarity Analytics -->
     <script type="text/javascript">
-      (function(c,l,a,r,i,t,y){
-          c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-          t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-          y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-      })(window, document, "clarity", "script", "y25uky30vb");
+      try {
+        (function(c,l,a,r,i,t,y){
+            c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+            t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+            y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+        })(window, document, "clarity", "script", "y25uky30vb");
+      } catch (e) {
+        console.warn("Clarity initial load notice:", e);
+      }
     </script>
     
     <!-- Leaflet Map JS Library -->
