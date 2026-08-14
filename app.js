@@ -78,7 +78,7 @@ function initApplication() {
  * This avoids repeated document.getElementById calls for better performance.
  */
 function cacheDOMElements() {
-  elements.mapContainer = document.getElementById("onemap-container") || document.getElementById("google-map-container");
+  elements.mapContainer = document.getElementById("onemap-container");
   elements.onemapSearchInput = document.getElementById("onemap-search-input");
   elements.onemapSearchDropdown = document.getElementById("onemap-search-dropdown");
   elements.clearSearchBtn = document.getElementById("clear-search-btn");
@@ -714,7 +714,7 @@ function escapeHtml(str) {
 }
 
 /**
- * Renders an interactive Fallback Map Canvas if the Google Maps JavaScript API is offline or loading.
+ * Renders an interactive Fallback Map Canvas if the OneMap map service is offline or initializing.
  * Plots user position, radius circle, and colored car park nodes.
  */
 function renderFallbackMapCanvas() {
@@ -735,7 +735,7 @@ function renderFallbackMapCanvas() {
 }
 
 /**
- * Draws coordinate nodes and radius on the 2D HTML5 canvas when Google Maps JS is not yet mounted.
+ * Draws coordinate nodes and radius on the 2D HTML5 canvas when OneMap Leaflet is not yet mounted.
  */
 function drawFallbackCanvas() {
   const canvas = document.getElementById("fallback-map-canvas");
@@ -1105,7 +1105,7 @@ function openDetailModal(cp) {
     `;
   }
 
-  // Google Maps Directions link
+  // Navigation Directions external link
   if (elements.modalNavigateBtn) {
     elements.modalNavigateBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${cp.lat},${cp.lng}`;
   }

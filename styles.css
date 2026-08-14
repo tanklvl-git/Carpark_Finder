@@ -503,7 +503,7 @@ html, body {
   margin-left: auto;
 }
 
-/* 6. Map Viewport & Google Map Canvas */
+/* 6. Map Viewport & OneMap Canvas */
 .map-viewport {
   position: relative;
   flex: 1;

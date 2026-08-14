@@ -1028,15 +1028,13 @@ export default async function handler(req, res) {
     const query = req.query || {};
     const action = (query.action || "carparks").toString().trim();
 
-    // 1. Action: Return public config (OneMap & Google Maps Key presence, status)
+    // 1. Action: Return public config (OneMap & LTA DataMall status)
     if (action === "config") {
-      const gmpKey = process.env.GOOGLE_MAPS_PLATFORM_KEY || "";
       const ltaKey = process.env.LTA_DATAMALL_KEY || DEFAULT_LTA_ACCOUNT_KEY;
       return res.status(200).json({
         success: true,
         mapProvider: "OneMap",
         oneMapSearchEndpoint: "https://www.onemap.gov.sg/api/common/elastic/search",
-        hasGoogleMapsKey: Boolean(gmpKey && gmpKey !== "MY_GOOGLE_MAPS_KEY" && gmpKey !== "YOUR_API_KEY"),
         hasLTAKey: Boolean(ltaKey),
         ltaEndpoint: LTA_DATAMALL_ENDPOINT,
         defaultCoordinates: {

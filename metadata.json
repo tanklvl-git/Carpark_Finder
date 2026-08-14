@@ -1,6 +1,6 @@
 {
   "name": "Singapore Car Park & EV Finder",
-  "description": "Real-time car park availability and EV charging locator within 1-3km radius on Google Maps.",
+  "description": "Real-time car park availability and EV charging locator within 1-3km radius on Singapore OneMap.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

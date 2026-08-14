@@ -50,22 +50,6 @@ async function startServer() {
     }
   });
 
-  // Google Maps JS bootstrap loader script proxy (Keeps key server-side)
-  app.get("/api/maps-js", (req, res) => {
-    const key = process.env.GOOGLE_MAPS_PLATFORM_KEY || "";
-    if (!key || key === "MY_GOOGLE_MAPS_KEY" || key === "YOUR_API_KEY") {
-      res.setHeader("Content-Type", "application/javascript");
-      return res.status(200).send(`
-        console.warn("Google Maps API key is not configured in process.env.GOOGLE_MAPS_PLATFORM_KEY");
-        window.__GOOGLE_MAPS_KEY_MISSING__ = true;
-      `);
-    }
-    const callback = req.query.callback ? encodeURIComponent(String(req.query.callback)) : "initGoogleMap";
-    const libraries = "places,geometry,marker";
-    const targetUrl = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callback}&libraries=${libraries}&v=weekly`;
-    res.redirect(targetUrl);
-  });
-
   // Vite development middleware or production static server
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -5,7 +5,7 @@ You are a senior front-end developer: vanilla JavaScript, responsive UI, and ser
 
 ## Goal
 Build a web application with:
-1. To show the current location within Google Map
+1. To show the current location within Singapore OneMap (SLA)
 2. To show the location of available car park lots within a radius of 1 to 3km with the option to change via a slider at the bottom of the page
 3. To show the option to filter for car park lots with EV charging as a toggle button besides the slider
 4. To refresh the status every 1 mins
@@ -26,5 +26,5 @@ This prompt will be saved into MasterPrompt.md.
 ## Context
 - **Audience:** car owners, strong HTML/CSS, limited JS.
 - **Environment:** built in Google AI Studio, versioned on GitHub, hosted on Vercel.
-- **Resources:** LTA DataMall API for carpark data and Google API for Map data.
+- **Resources:** LTA DataMall API for carpark data and Singapore OneMap SLA API for Map data and geocoding search.
 - **Purpose:** to find the available car park lots around the target location with the option to find EV charging.
