@@ -275,8 +275,8 @@ function loadOrRefreshDisqus() {
       window.DISQUS.reset({
         reload: true,
         config: function () {
-          this.page.url = window.location.href;
-          this.page.identifier = "parkfinder-feedback";
+          this.page.url = window.location.origin + window.location.pathname;
+          this.page.identifier = "carpark-finder-singapore-feedback";
         }
       });
     } else if (!document.getElementById("disqus-embed-script")) {
@@ -284,6 +284,7 @@ function loadOrRefreshDisqus() {
       s.id = "disqus-embed-script";
       s.src = "https://carpark-finder.disqus.com/embed.js";
       s.setAttribute("data-timestamp", String(+new Date()));
+      s.async = true;
       (d.head || d.body).appendChild(s);
     }
   } catch (err) {

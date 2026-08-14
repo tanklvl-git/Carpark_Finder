@@ -27,6 +27,22 @@
     
     <!-- Application Stylesheet -->
     <link rel="stylesheet" href="/styles.css" />
+
+    <!-- Global Error Shield for Third-Party / Cross-Origin Scripts (e.g. Disqus) -->
+    <script>
+      window.onerror = function (message, source, lineno, colno, error) {
+        if (message === "Script error." || (source && source.includes("disqus"))) {
+          console.warn("Suppressed external script event:", message, source);
+          return true;
+        }
+        return false;
+      };
+      window.addEventListener("unhandledrejection", function (event) {
+        if (event.reason && (event.reason.message === "Script error." || String(event.reason).includes("disqus"))) {
+          event.preventDefault();
+        }
+      });
+    </script>
     
     <!-- Leaflet Map JS Library -->
     <script
@@ -372,17 +388,24 @@
               /**
               *  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
               *  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables    */
-              /*
               var disqus_config = function () {
-              this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-              this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+                try {
+                  this.page.url = window.location.origin + window.location.pathname;
+                  this.page.identifier = "carpark-finder-singapore-feedback";
+                } catch (e) {
+                  // Ignore URL derivation errors
+                }
               };
-              */
               (function() { // DON'T EDIT BELOW THIS LINE
-              var d = document, s = d.createElement('script');
-              s.src = 'https://carpark-finder.disqus.com/embed.js';
-              s.setAttribute('data-timestamp', +new Date());
-              (d.head || d.body).appendChild(s);
+                try {
+                  var d = document, s = d.createElement('script');
+                  s.src = 'https://carpark-finder.disqus.com/embed.js';
+                  s.setAttribute('data-timestamp', +new Date());
+                  s.async = true;
+                  (d.head || d.body).appendChild(s);
+                } catch (e) {
+                  console.warn("Disqus script initialization notice:", e);
+                }
               })();
           </script>
           <noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
