@@ -55,6 +55,36 @@
           </div>
         </div>
 
+        <!-- Main View Navigation Tabs -->
+        <nav class="app-nav-tabs" role="tablist" aria-label="Main Application Views">
+          <button
+            type="button"
+            class="nav-tab-btn active"
+            id="tab-btn-map"
+            role="tab"
+            aria-selected="true"
+            aria-controls="main-content"
+          >
+            <svg class="tab-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+            </svg>
+            <span>Map & Car Parks</span>
+          </button>
+          <button
+            type="button"
+            class="nav-tab-btn"
+            id="tab-btn-feedback"
+            role="tab"
+            aria-selected="false"
+            aria-controls="tab-view-feedback"
+          >
+            <svg class="tab-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+            <span>Feedback</span>
+          </button>
+        </nav>
+
         <!-- Header Actions: Refresh Timer & Manual Trigger -->
         <div class="header-actions">
           <div class="refresh-status-badge" id="refresh-indicator" role="status" aria-live="polite">
@@ -313,6 +343,52 @@
       </section>
 
     </main>
+
+    <!-- Feedback Tab View (Disqus Integration) -->
+    <section
+      class="feedback-view-container custom-scrollbar"
+      id="tab-view-feedback"
+      role="tabpanel"
+      aria-labelledby="tab-btn-feedback"
+      hidden
+    >
+      <div class="feedback-content-card" id="feedback-card">
+        <div class="feedback-card-header">
+          <div class="feedback-badge">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+            <span>COMMUNITY & FEEDBACK</span>
+          </div>
+          <h2 class="feedback-heading">User Feedback & Discussions</h2>
+          <p class="feedback-description">
+            Share your feedback, suggest new features, report parking or EV availability updates, or join the discussion with the ParkFinder Insight community.
+          </p>
+        </div>
+
+        <div class="feedback-disqus-wrapper" id="feedback-disqus-wrapper">
+          <div id="disqus_thread"></div>
+          <script>
+              /**
+              *  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+              *  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables    */
+              /*
+              var disqus_config = function () {
+              this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+              this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+              };
+              */
+              (function() { // DON'T EDIT BELOW THIS LINE
+              var d = document, s = d.createElement('script');
+              s.src = 'https://carpark-finder.disqus.com/embed.js';
+              s.setAttribute('data-timestamp', +new Date());
+              (d.head || d.body).appendChild(s);
+              })();
+          </script>
+          <noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+        </div>
+      </div>
+    </section>
 
     <!-- High Density Bottom Status Bar (h-8 bg-slate-900) -->
     <footer class="app-status-footer" id="app-status-footer" role="contentinfo">

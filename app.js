@@ -57,7 +57,11 @@ const elements = {
   modalCarparkTitle: null,
   modalCarparkArea: null,
   modalCarparkBody: null,
-  modalNavigateBtn: null
+  modalNavigateBtn: null,
+  tabBtnMap: null,
+  tabBtnFeedback: null,
+  mainContent: null,
+  tabViewFeedback: null
 };
 
 /**
@@ -108,6 +112,10 @@ function cacheDOMElements() {
   elements.modalCarparkArea = document.getElementById("modal-carpark-area");
   elements.modalCarparkBody = document.getElementById("modal-carpark-body");
   elements.modalNavigateBtn = document.getElementById("modal-navigate-btn");
+  elements.tabBtnMap = document.getElementById("tab-btn-map");
+  elements.tabBtnFeedback = document.getElementById("tab-btn-feedback");
+  elements.mainContent = document.getElementById("main-content");
+  elements.tabViewFeedback = document.getElementById("tab-view-feedback");
 }
 
 /**
@@ -115,6 +123,13 @@ function cacheDOMElements() {
  * No inline JavaScript (such as onclick="...") is used in the HTML markup.
  */
 function setupEventListeners() {
+  // Navigation Tabs Switching (Map & Car Parks vs Feedback)
+  if (elements.tabBtnMap) {
+    elements.tabBtnMap.addEventListener("click", () => switchMainTab("map"));
+  }
+  if (elements.tabBtnFeedback) {
+    elements.tabBtnFeedback.addEventListener("click", () => switchMainTab("feedback"));
+  }
   // OneMap Search Bar Live Typing & Autocomplete
   if (elements.onemapSearchInput) {
     elements.onemapSearchInput.addEventListener("input", handleOneMapSearchInput);
@@ -203,6 +218,77 @@ function setupEventListeners() {
       closeDetailModal();
     }
   });
+}
+
+/**
+ * Switches the active application view between "map" (Map & Car Parks) and "feedback" (Disqus feedback).
+ * @param {'map' | 'feedback'} tabName
+ */
+function switchMainTab(tabName) {
+  if (tabName === "map") {
+    if (elements.tabBtnMap) {
+      elements.tabBtnMap.classList.add("active");
+      elements.tabBtnMap.setAttribute("aria-selected", "true");
+    }
+    if (elements.tabBtnFeedback) {
+      elements.tabBtnFeedback.classList.remove("active");
+      elements.tabBtnFeedback.setAttribute("aria-selected", "false");
+    }
+    if (elements.mainContent) {
+      elements.mainContent.hidden = false;
+    }
+    if (elements.tabViewFeedback) {
+      elements.tabViewFeedback.hidden = true;
+    }
+    // Re-measure Leaflet map container to prevent rendering glitches
+    if (state.leafMap) {
+      setTimeout(() => {
+        state.leafMap.invalidateSize();
+      }, 60);
+    }
+  } else if (tabName === "feedback") {
+    if (elements.tabBtnFeedback) {
+      elements.tabBtnFeedback.classList.add("active");
+      elements.tabBtnFeedback.setAttribute("aria-selected", "true");
+    }
+    if (elements.tabBtnMap) {
+      elements.tabBtnMap.classList.remove("active");
+      elements.tabBtnMap.setAttribute("aria-selected", "false");
+    }
+    if (elements.mainContent) {
+      elements.mainContent.hidden = true;
+    }
+    if (elements.tabViewFeedback) {
+      elements.tabViewFeedback.hidden = false;
+    }
+    // Trigger Disqus load / reset if available
+    loadOrRefreshDisqus();
+  }
+}
+
+/**
+ * Loads or resets the Disqus discussion thread safely.
+ */
+function loadOrRefreshDisqus() {
+  try {
+    if (window.DISQUS) {
+      window.DISQUS.reset({
+        reload: true,
+        config: function () {
+          this.page.url = window.location.href;
+          this.page.identifier = "parkfinder-feedback";
+        }
+      });
+    } else if (!document.getElementById("disqus-embed-script")) {
+      const d = document, s = d.createElement("script");
+      s.id = "disqus-embed-script";
+      s.src = "https://carpark-finder.disqus.com/embed.js";
+      s.setAttribute("data-timestamp", String(+new Date()));
+      (d.head || d.body).appendChild(s);
+    }
+  } catch (err) {
+    console.warn("Disqus load note:", err);
+  }
 }
 
 /**
